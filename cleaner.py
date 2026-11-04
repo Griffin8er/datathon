@@ -31,5 +31,8 @@ dataset = dataset.dropna(subset=["student_id"]).drop_duplicates(subset="student_
 cols_to_convert = [col for col in dataset.columns if col not in ['hs_gpa', 'credit_hrs']]
 dataset[cols_to_convert] = dataset[cols_to_convert].astype('Int64')
 
+# Could change to original file name but chose not to overwrite cuz safer
+# cleaned_dataset.xlsx is in the .gitignore
+
 with pd.ExcelWriter("cleaned_dataset.xlsx") as writer:
     dataset.to_excel(writer, index=False)
