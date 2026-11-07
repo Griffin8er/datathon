@@ -1,11 +1,3 @@
-"""Train the enrollment model with the original features plus deposit information.
-
-Run without arguments to train on the same rows as prediction_model.py.
-Run with --predict INPUT to score cleaned CSV/Excel rows with the saved model.
-Deposit status and dates must be available at prediction time. Training includes
-all labeled applicants, including those who have not deposited.
-"""
-
 import argparse
 import json
 from pathlib import Path

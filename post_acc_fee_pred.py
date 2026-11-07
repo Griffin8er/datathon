@@ -1,11 +1,3 @@
-"""Train the enrollment model with the original features plus acceptance_fee.
-
-Run without arguments to train on the same rows as prediction_model.py.
-Run with --predict INPUT to score cleaned CSV/Excel rows with the saved model.
-The acceptance_fee category must be available at prediction time. Training includes
-all labeled applicants and excludes deposit status and deposit dates.
-"""
-
 import argparse
 import json
 from pathlib import Path
@@ -17,7 +9,6 @@ from prediction_model import load_selection, predict, read_table, train
 
 BASE_DIR = Path(__file__).resolve().parent
 ADDITIONAL_FEATURES = ["acceptance_fee"]
-DEPOSIT_COLUMNS = {"deposit_dt", "deposit_mo", "deposit_yr", "deposited"}
 
 
 def prepare_split(summary_path, input_path, output_dir):
@@ -29,7 +20,7 @@ def prepare_split(summary_path, input_path, output_dir):
     print(f"Reading {source} ...", flush=True)
     dataset = read_table(source)
     features = list(dict.fromkeys(
-        [name for name in original_features if name not in DEPOSIT_COLUMNS]
+        [name for name in original_features]
         + ADDITIONAL_FEATURES
     ))
     missing = [name for name in features + [target] if name not in dataset]

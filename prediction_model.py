@@ -1,10 +1,3 @@
-"""Train an enrollment classifier, or use a saved model on cleaned CSV/Excel rows.
-
-Run without arguments to train using the existing feature-reduction split.
-Run with --predict INPUT to write enrollment probabilities and binary predictions.
-Input category codes must match the original cleaned data; do not refactorize them.
-"""
-
 import argparse
 import json
 from pathlib import Path
