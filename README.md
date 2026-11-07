@@ -4,6 +4,8 @@ For a guided walkthrough with saved cell outputs, open these notebooks in order 
 
 **Temporal-validation update:** train on entry years 2022-2024, validate on 2025, and reserve 2026 for final testing. Feature selection uses training rows only. Run All in notebook 04 evaluates all three variants on 2025, then scores the unchanged fitted models on 2026 in one final-evaluation section (`final_test_comparison.csv` in `results/`). Do not tune against the final-test results.
 
+**Calendar-field update:** feature selection now excludes absolute calendar years and days of the month (`entry_year`, `app_yr`, `app_dt`, `visit_yr`, `visit_dt`, `first_contact_yr`, `first_contact_dt`), which do not transfer to a new cohort. Visit timing is kept as `visit_yrs_before_entry`, the entry year minus the most recent visit year. This change was made after a first 2026 evaluation, so the current 2026 results are a revised comparison, not an untouched test.
+
 1. [01_cleaner.ipynb](./01_cleaner.ipynb) — clean the spreadsheet, inspect missingness, and save the data and category-code lookup.
 2. [02_preliminary_analysis.ipynb](./02_preliminary_analysis.ipynb) — display every predictor's enrollment chart and summary table, while saving PNGs in [preliminary_plots/](./preliminary_plots/).
 3. [03_feature_reduction.ipynb](./03_feature_reduction.ipynb) — explain the split and selection, inspect rankings, and save reduced data in [feature_reduction_output/](./feature_reduction_output/).
