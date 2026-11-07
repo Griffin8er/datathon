@@ -5,6 +5,4 @@ __pycache__/
 preliminary_plots/
 cleaned_dataset.xlsx
 feature_reduction_output/
-prediction_model_output/
-post_deposit_pred_output/
-post_acc_fee_pred_output/
+results/

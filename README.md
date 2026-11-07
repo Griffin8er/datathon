@@ -1,6 +1,6 @@
 # datathon
 
-If using PowerShell, run these commands from the project folder. Setup is followed by cleaning, preliminary analysis, feature reduction, and model training; the three model commands can run in any order after feature reduction.
+If using PowerShell, run these commands from the project folder. Setup is followed by cleaning, preliminary analysis, feature reduction, and model training.
 
 ```powershell
 # Create a virtual environment and install dependencies (first-time setup).
@@ -18,17 +18,26 @@ python -m venv .venv
 #    save rankings and an 80/20 train/test split in feature_reduction_output/.
 .\.venv\Scripts\python.exe feature_reduction.py
 
-# 4. Train and evaluate the enrollment model using the selected features.
+# 4. Train and evaluate all three enrollment model versions in results/.
 .\.venv\Scripts\python.exe prediction_model.py
-
-# 5. Train and evaluate a variant that adds deposit status and dates.
-.\.venv\Scripts\python.exe post_deposit_pred.py
-
-# 6. Train and evaluate a variant that adds acceptance fee information
-#    while excluding deposit status and dates.
-.\.venv\Scripts\python.exe post_acc_fee_pred.py
 ```
 
-Each model saves its trained model, evaluation metrics, and test predictions in its own output folder: `prediction_model_output/`, `post_deposit_pred_output/`, or `post_acc_fee_pred_output/`. The variants use the same train/test rows for comparison.
+One training run saves three versions in [results/](./results/), each retaining all 15 original features from [feature_reduction.py](./feature_reduction.py):
+
+| File prefix | Features |
+| --- | --- |
+| `no_acceptance_fee_no_deposits` | Original 15 only |
+| `with_acceptance_fee_no_deposits` | Original 15 + acceptance_fee (16 total) |
+| `with_acceptance_fee_and_deposits` | Original 15 + acceptance_fee + deposit_dt, deposit_mo, deposit_yr, deposited (20 total) |
+
+Each prefix has a `_model.joblib`, `_metrics.json`, and `_test_predictions.csv` file. All versions use the same verified train/test rows and classifier settings. Training reads the cleaned source specified by the feature selection summary; use `--input` to override its location. The previous output folders are historical; new runs write to [results/](./results/).
+
+To score new cleaned rows with a saved version:
+
+```powershell
+.\.venv\Scripts\python.exe prediction_model.py --predict cleaned_dataset.xlsx --variant with_acceptance_fee_and_deposits
+```
+
+This saves `with_acceptance_fee_and_deposits_predictions.csv` in [results/](./results/). Use `--predictions-output` to choose another path, or `--model` to load an explicit saved model. The default scoring version is `no_acceptance_fee_no_deposits`.
 
 Preliminary analysis and feature reduction prefer `cleaned_dataset.csv` if present; otherwise they use the Excel file produced by cleaning. Remove any stale CSV before running the pipeline so these steps use the newly cleaned data.

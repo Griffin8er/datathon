@@ -26,9 +26,17 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder
 from threadpoolctl import threadpool_limits
 
+from feature_reduction import stratified_split
+
 BASE_DIR = Path(__file__).resolve().parent
 # cleaner.py encodes missing values in these nominal fields as -1.
 FACTORIZED_COLUMNS = {"app_fee", "acceptance_fee", "residency", "sex", "college"}
+DEPOSIT_FEATURES = ["deposit_dt", "deposit_mo", "deposit_yr", "deposited"]
+MODEL_VARIANTS = {
+    "no_acceptance_fee_no_deposits": [],
+    "with_acceptance_fee_no_deposits": ["acceptance_fee"],
+    "with_acceptance_fee_and_deposits": ["acceptance_fee", *DEPOSIT_FEATURES],
+}
 
 
 def read_table(path):
@@ -73,14 +81,53 @@ def load_selection(path):
     return summary, features, target
 
 
-def load_split(path, features, target):
-    frame = read_table(path)
+def load_split(frame, features, target):
     if target not in frame:
-        raise ValueError(f"Missing target column '{target}' in {path}.")
+        raise ValueError(f"Missing target column '{target}' in split.")
     labels = pd.to_numeric(frame[target], errors="raise")
     if labels.isna().any() or not labels.isin([0, 1]).all() or labels.nunique() != 2:
-        raise ValueError(f"{path} must contain both classes, encoded as 0 and 1.")
+        raise ValueError("Each split must contain both classes, encoded as 0 and 1.")
     return frame, prepare_features(frame, features), labels.astype(int)
+
+
+def prepare_splits(summary_path, input_path=None):
+    """Recover additional columns only after verifying the feature-selection rows."""
+    summary, original_features, target = load_selection(summary_path)
+    if len(original_features) != 15:
+        raise ValueError("Expected the original top 15 features; rerun feature_reduction.py with --top-k 15.")
+    if set(original_features).intersection(["acceptance_fee", *DEPOSIT_FEATURES]):
+        raise ValueError("The original 15 features must exclude acceptance_fee and deposit columns.")
+    source = input_path if input_path is not None else Path(summary["input"])
+    print(f"Reading {source} ...", flush=True)
+    dataset = read_table(source)
+    required = original_features + ["acceptance_fee", *DEPOSIT_FEATURES, target]
+    missing = [name for name in required if name not in dataset]
+    if missing:
+        raise ValueError(f"Missing source columns: {', '.join(missing)}")
+    if not dataset[target].dropna().isin([0, 1]).all():
+        raise ValueError(f"'{target}' must contain only 0, 1, or missing values.")
+    labeled = dataset.dropna(subset=[target]).reset_index(drop=True)
+    train_positions, test_positions = stratified_split(labeled[target])
+    splits = {
+        "train": labeled.iloc[train_positions].reset_index(drop=True),
+        "test": labeled.iloc[test_positions].reset_index(drop=True),
+    }
+    for name, frame in splits.items():
+        original = read_table(summary_path.parent / f"reduced_{name}.csv")
+        try:
+            pd.testing.assert_frame_equal(
+                frame[original_features + [target]],
+                original[original_features + [target]],
+                check_dtype=False,
+            )
+        except AssertionError as error:
+            raise ValueError(
+                f"Reconstructed {name} rows do not match the original split. "
+                "Use the same cleaned source data used for feature reduction."
+            ) from error
+        if summary.get(f"{name}_rows", len(frame)) != len(frame):
+            raise ValueError(f"{name}_rows does not match the selection summary; regenerate the split.")
+    return summary, original_features, target, splits
 
 
 def build_model(features):
@@ -148,16 +195,21 @@ def save_predictions(frame, probabilities, threshold, output, target):
     result.to_csv(output, index=False)
 
 
-def train(summary_path, output_dir, model_path, threshold):
-    summary, features, target = load_selection(summary_path)
-    # Re-splitting would mix feature-selection training rows into the test set.
-    train_path = summary_path.parent / "reduced_train.csv"
-    test_path = summary_path.parent / "reduced_test.csv"
-    _, training, train_labels = load_split(train_path, features, target)
-    test_frame, testing, test_labels = load_split(test_path, features, target)
-    for key, count in (("train_rows", len(training)), ("test_rows", len(testing))):
-        if key in summary and summary[key] != count:
-            raise ValueError(f"{key} does not match the selection summary; regenerate the split.")
+def train(summary_path, output_dir, threshold, input_path=None):
+    summary, original_features, target, splits = prepare_splits(summary_path, input_path)
+    for variant, additional_features in MODEL_VARIANTS.items():
+        train_variant(
+            summary_path, summary, original_features, target, splits,
+            variant, additional_features, output_dir, threshold,
+        )
+
+
+def train_variant(summary_path, summary, original_features, target, splits,
+                  variant, additional_features, output_dir, threshold):
+    features = original_features + additional_features
+    _, training, train_labels = load_split(splits["train"], features, target)
+    test_frame, testing, test_labels = load_split(splits["test"], features, target)
+    model_path = output_dir / f"{variant}_model.joblib"
 
     model = build_model(features)
     started = perf_counter()
@@ -170,6 +222,9 @@ def train(summary_path, output_dir, model_path, threshold):
     baseline_probabilities = baseline.predict_proba(testing)[:, 1]
     metrics = evaluate(test_labels, probabilities, threshold)
     report = {
+        "variant": variant,
+        "original_selected_features": original_features,
+        "additional_features": additional_features,
         "model": "HistGradientBoostingClassifier",
         "scikit_learn_version": sklearn.__version__,
         "selected_features": features,
@@ -186,7 +241,11 @@ def train(summary_path, output_dir, model_path, threshold):
         "confusion_matrix_layout": "Rows = actual [0, 1]; columns = predicted [0, 1].",
         "selection_summary": str(summary_path.resolve()),
         "split": summary.get("split"),
-        "prediction_time_assumption": summary.get("prediction_time_assumption"),
+        "prediction_time_assumption": (
+            "All selected fields must be available at prediction time. "
+            f"Acceptance fee included: {'acceptance_fee' in features}; "
+            f"deposit status and dates included: {'deposited' in features}."
+        ),
         "evaluation_note": (
             "Feature selection and preprocessing use training rows only. Early stopping "
             "uses an internal training-data validation split. The original test set is "
@@ -197,17 +256,18 @@ def train(summary_path, output_dir, model_path, threshold):
     output_dir.mkdir(parents=True, exist_ok=True)
     model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({
+        "variant": variant,
         "model": model,
         "selected_features": features,
         "target": target,
         "threshold": threshold,
         "scikit_learn_version": sklearn.__version__,
     }, model_path)
-    (output_dir / "metrics.json").write_text(
+    (output_dir / f"{variant}_metrics.json").write_text(
         json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
-    save_predictions(test_frame, probabilities, threshold, output_dir / "test_predictions.csv", target)
-    print(f"Trained on {len(training):,} rows with {len(features)} features in {fit_seconds:.2f}s.")
+    save_predictions(test_frame, probabilities, threshold, output_dir / f"{variant}_test_predictions.csv", target)
+    print(f"\n{variant}: trained on {len(training):,} rows with {len(features)} features in {fit_seconds:.2f}s.")
     print(f"Held-out test rows: {len(testing):,}; enrollment rate: {test_labels.mean():.1%}")
     for name in ("accuracy", "precision", "recall", "f1", "roc_auc", "average_precision"):
         print(f"  {name}: {metrics[name]:.4f}")
@@ -230,8 +290,11 @@ def predict(input_path, model_path, output, threshold=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, default=BASE_DIR / "feature_reduction_output" / "selection_summary.json")
-    parser.add_argument("--output-dir", type=Path, default=BASE_DIR / "prediction_model_output")
-    parser.add_argument("--model", type=Path, help="Saved model path; defaults to OUTPUT_DIR/enrollment_model.joblib.")
+    parser.add_argument("--input", type=Path, help="Cleaned source CSV/XLSX for training; defaults to the selection summary input.")
+    parser.add_argument("--output-dir", type=Path, default=BASE_DIR / "results")
+    parser.add_argument("--model", type=Path, help="Saved model path (with --predict); overrides --variant.")
+    parser.add_argument("--variant", choices=MODEL_VARIANTS, default="no_acceptance_fee_no_deposits",
+                        help="Saved variant to use with --predict; training always produces all three.")
     parser.add_argument("--predict", type=Path, help="Predict on cleaned CSV/XLSX rows instead of training.")
     parser.add_argument("--predictions-output", type=Path, help="Prediction CSV path (with --predict).")
     parser.add_argument("--threshold", type=float, help="Probability cutoff in (0, 1); defaults to 0.5 or the saved cutoff.")
@@ -240,13 +303,17 @@ def main():
         parser.error("--threshold must be between 0 and 1")
     if args.predictions_output is not None and args.predict is None:
         parser.error("--predictions-output requires --predict")
-    model_path = args.model if args.model is not None else args.output_dir / "enrollment_model.joblib"
+    if args.model is not None and args.predict is None:
+        parser.error("--model requires --predict; training saves one named model per variant")
+    if args.input is not None and args.predict is not None:
+        parser.error("--input is for training; use --predict for scoring rows")
     try:
         if args.predict is not None:
-            output = args.predictions_output or args.output_dir / "predictions.csv"
+            model_path = args.model or args.output_dir / f"{args.variant}_model.joblib"
+            output = args.predictions_output or args.output_dir / f"{model_path.stem.removesuffix('_model')}_predictions.csv"
             predict(args.predict, model_path, output, args.threshold)
         else:
-            train(args.summary, args.output_dir, model_path, args.threshold if args.threshold is not None else 0.5)
+            train(args.summary, args.output_dir, args.threshold if args.threshold is not None else 0.5, args.input)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
 
