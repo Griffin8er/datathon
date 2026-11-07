@@ -4,5 +4,6 @@
 __pycache__/
 preliminary_plots/
 cleaned_dataset.xlsx
+cleaned_category_lookup.csv
 feature_reduction_output/
 results/

@@ -1,5 +1,14 @@
 # datathon
 
+For a guided walkthrough with saved cell outputs, open these notebooks in order and run each from top to bottom:
+
+1. [01_cleaner.ipynb](./01_cleaner.ipynb) — clean the spreadsheet, inspect missingness, and save the data and category-code lookup.
+2. [02_preliminary_analysis.ipynb](./02_preliminary_analysis.ipynb) — display every predictor's enrollment chart and summary table, while saving PNGs in [preliminary_plots/](./preliminary_plots/).
+3. [03_feature_reduction.ipynb](./03_feature_reduction.ipynb) — explain the split and selection, inspect rankings, and save reduced data in [feature_reduction_output/](./feature_reduction_output/).
+4. [04_prediction_model.ipynb](./04_prediction_model.ipynb) — fit and compare three models, display metrics and prediction previews, and save models, reports, predictions, and comparison charts in [results/](./results/).
+
+Choose the project's virtual environment as the notebook kernel. Install the dependencies below, plus `ipykernel`, to run the notebooks in VS Code (`python -m pip install -r requirements.txt ipykernel`). Keep the project folder as the working directory. **Run All** refreshes both the visible results and the files on disk. The notebooks explicitly read [cleaned_dataset.xlsx](./cleaned_dataset.xlsx) to stay consistent with the cleaning step. Existing scripts remain available for command-line use.
+
 If using PowerShell, run these commands from the project folder. Setup is followed by cleaning, preliminary analysis, feature reduction, and model training.
 
 ```powershell
